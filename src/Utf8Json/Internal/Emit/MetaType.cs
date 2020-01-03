@@ -38,7 +38,7 @@ namespace Utf8Json.Internal.Emit
 					if (dataContractPresent && dm == null) continue;
                     var name = (dm != null && dm.Name != null) ? dm.Name : nameMutetor(item.Name);
 
-                    var member = new MetaMember(item, name, allowPrivate);
+                    var member = new MetaMember(type, item, name, allowPrivate);
                     if (!member.IsReadable && !member.IsWritable) continue;
 
                     if (stringMembers.ContainsKey(member.Name))
@@ -58,7 +58,7 @@ namespace Utf8Json.Internal.Emit
 					if (dataContractPresent && dm == null) continue;
                     var name = (dm != null && dm.Name != null) ? dm.Name : nameMutetor(item.Name);
 
-                    var member = new MetaMember(item, name, allowPrivate);
+                    var member = new MetaMember(type, item, name, allowPrivate);
                     if (!member.IsReadable && !member.IsWritable) continue;
 
                     if (stringMembers.ContainsKey(member.Name))

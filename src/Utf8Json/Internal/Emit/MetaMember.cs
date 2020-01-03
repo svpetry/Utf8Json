@@ -8,6 +8,44 @@ using System.Runtime.Serialization;
 
 namespace Utf8Json.Internal.Emit
 {
+    public static class NonPublicFieldAccessor
+    {
+        private static readonly List<Func<object, object>> getterDelegates = new List<Func<object, object>>();
+        private static readonly List<Action<object, object>> setterDelegates = new List<Action<object, object>>();
+
+        public static MethodInfo GetNonPublicFieldMethod;
+
+        public static MethodInfo SetNonPublicFieldMethod;
+
+        static NonPublicFieldAccessor()
+        {
+            GetNonPublicFieldMethod = typeof(NonPublicFieldAccessor).GetMethod("GetNonPublicField", BindingFlags.Static | BindingFlags.Public);
+            SetNonPublicFieldMethod = typeof(NonPublicFieldAccessor).GetMethod("SetNonPublicField", BindingFlags.Static | BindingFlags.Public);
+        }
+
+        public static int AddGetterDelegate(Delegate del)
+        {
+            getterDelegates.Add((Func<object, object>)del);
+            return getterDelegates.Count - 1;
+        }
+
+        public static int AddSetterDelegate(Delegate del)
+        {
+            setterDelegates.Add((Action<object, object>)del);
+            return setterDelegates.Count - 1;
+        }
+
+        public static object GetNonPublicField(object obj, int delegateIdx)
+        {
+            return getterDelegates[delegateIdx].Invoke(obj);
+        }
+
+        public static void SetNonPublicField(object obj, object value, int delegateIdx)
+        {
+            setterDelegates[delegateIdx].Invoke(obj, value);
+        }
+    }
+
     internal class MetaMember
     {
         public string Name { get; private set; }
@@ -17,10 +55,12 @@ namespace Utf8Json.Internal.Emit
         public bool IsField { get { return FieldInfo != null; } }
         public bool IsWritable { get; private set; }
         public bool IsReadable { get; private set; }
+        public bool IsPublic { get; private set; }
         public Type Type { get; private set; }
         public FieldInfo FieldInfo { get; private set; }
         public PropertyInfo PropertyInfo { get; private set; }
         public MethodInfo ShouldSerializeMethodInfo { get; private set; }
+        public Type ParentType { get;private set; }
 
         MethodInfo getMethod;
         MethodInfo setMethod;
@@ -34,19 +74,24 @@ namespace Utf8Json.Internal.Emit
             this.IsReadable = isReadable;
         }
 
-        public MetaMember(FieldInfo info, string name, bool allowPrivate)
+        public MetaMember(Type parentType, FieldInfo info, string name, bool allowPrivate)
         {
+            this.ParentType = parentType;
+            
             this.Name = name;
             this.MemberName = info.Name;
             this.FieldInfo = info;
             this.Type = info.FieldType;
             this.IsReadable = allowPrivate || info.IsPublic;
             this.IsWritable = allowPrivate || (info.IsPublic && !info.IsInitOnly);
+            this.IsPublic = info.IsPublic;
             this.ShouldSerializeMethodInfo = GetShouldSerialize(info);
         }
 
-        public MetaMember(PropertyInfo info, string name, bool allowPrivate)
+        public MetaMember(Type parentType, PropertyInfo info, string name, bool allowPrivate)
         {
+            this.ParentType = parentType;
+
             this.getMethod = info.GetGetMethod(true);
             this.setMethod = info.GetSetMethod(true);
 
@@ -93,7 +138,25 @@ namespace Utf8Json.Internal.Emit
             }
             else
             {
-                il.Emit(OpCodes.Ldfld, FieldInfo);
+                if (IsPublic)
+                {
+                    il.Emit(OpCodes.Ldfld, FieldInfo);
+                }
+                else
+                {
+                    // generate dynamic method to get nonpublic field value
+                    var dynMethod = new DynamicMethod("Get" + FieldInfo.Name, typeof(object), new[] { typeof(object) }, ParentType);
+                    var ilGen = dynMethod.GetILGenerator();
+
+                    ilGen.Emit(OpCodes.Ldarg_0);
+                    ilGen.Emit(OpCodes.Ldfld, FieldInfo);
+                    ilGen.Emit(OpCodes.Ret);
+
+                    var idx = NonPublicFieldAccessor.AddGetterDelegate(dynMethod.CreateDelegate(typeof(Func<object, object>)));
+                    
+                    il.EmitLdc_I4(idx);
+                    il.Emit(OpCodes.Call, NonPublicFieldAccessor.GetNonPublicFieldMethod);
+                }
             }
         }
 
@@ -105,7 +168,28 @@ namespace Utf8Json.Internal.Emit
             }
             else
             {
-                il.Emit(OpCodes.Stfld, FieldInfo);
+                if (IsPublic)
+                {
+                    il.Emit(OpCodes.Stfld, FieldInfo);
+                }
+                else
+                {
+                    // generate dynamic method to set nonpublic field value
+                    var dynMethod = new DynamicMethod("Set" + FieldInfo.Name, null, new[] { typeof(object), typeof(object) }, ParentType);
+                    var ilGen = dynMethod.GetILGenerator();
+
+                    ilGen.Emit(OpCodes.Ldarg_0);
+                    ilGen.Emit(OpCodes.Ldarg_1);
+                    ilGen.EmitUnboxOrCast(FieldInfo.FieldType);
+                    ilGen.Emit(OpCodes.Stfld, FieldInfo);
+                    ilGen.Emit(OpCodes.Ret);
+
+                    var idx = NonPublicFieldAccessor.AddSetterDelegate(dynMethod.CreateDelegate(typeof(Action<object, object>)));
+
+                    il.EmitBoxOrDoNothing(FieldInfo.FieldType);
+                    il.EmitLdc_I4(idx);
+                    il.Emit(OpCodes.Call, NonPublicFieldAccessor.SetNonPublicFieldMethod);
+                }
             }
         }
     }
