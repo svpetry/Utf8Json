@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -7,11 +8,36 @@ using Utf8Json.Internal.Emit;
 
 namespace Utf8Json.Formatters
 {
+    public sealed class DynamicObjectTypeFallbackFormatterAdapter<T> : IJsonFormatter<T>
+    {
+        private readonly IJsonFormatter<object> formatter;
+
+        public DynamicObjectTypeFallbackFormatterAdapter(IJsonFormatter<object> _formatter)
+        {
+            formatter = _formatter;
+        } 
+
+        public void Serialize(ref JsonWriter writer, T value, IJsonFormatterResolver formatterResolver)
+        {
+            formatter.Serialize(ref writer, value, formatterResolver);
+        }
+
+        public T Deserialize(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
+        {
+            var obj = formatter.Deserialize(ref reader, formatterResolver);
+            return (T)obj;
+        }
+    }
+
     public sealed class DynamicObjectTypeFallbackFormatter : IJsonFormatter<object>
     {
         delegate void SerializeMethod(object dynamicFormatter, ref JsonWriter writer, object value, IJsonFormatterResolver formatterResolver);
+        
+        delegate object DeserializeMethod(object dynamicFormatter, ref JsonReader reader, IJsonFormatterResolver formatterResolver);
 
         readonly ThreadsafeTypeKeyHashTable<KeyValuePair<object, SerializeMethod>> serializers = new ThreadsafeTypeKeyHashTable<KeyValuePair<object, SerializeMethod>>();
+
+        readonly ThreadsafeTypeKeyHashTable<KeyValuePair<object, DeserializeMethod>> deserializers = new ThreadsafeTypeKeyHashTable<KeyValuePair<object, DeserializeMethod>>();
 
         readonly IJsonFormatterResolver[] innerResolvers;
 
@@ -83,7 +109,63 @@ namespace Utf8Json.Formatters
 
         public object Deserialize(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
         {
-            return PrimitiveObjectFormatter.Default.Deserialize(ref reader, formatterResolver);
+            if (reader.ReadIsNull()) return null;
+
+            var typeName = reader.ReadTypeName();
+            if (typeName == null) return null;
+            var type = Type.GetType(typeName);
+            if (type == null) throw new UnknownTypeException(typeName);
+
+            KeyValuePair<object, DeserializeMethod> formatterAndDelegate;
+            if (!deserializers.TryGetValue(type, out formatterAndDelegate))
+            {
+                lock (deserializers)
+                {
+                    if (!deserializers.TryGetValue(type, out formatterAndDelegate))
+                    {
+                        object formatter = null;
+                        foreach (var innerResolver in innerResolvers)
+                        {
+                            formatter = innerResolver.GetFormatterDynamic(type);
+                            if (formatter != null) break;
+                        }
+                        if (formatter == null)
+                        {
+                            throw new FormatterNotRegisteredException(type.FullName + " is not registered in this resolver. resolvers:" + string.Join(", ", innerResolvers.Select(x => x.GetType().Name).ToArray()));
+                        }
+
+                        var t = type;
+                        {
+                            var dm = new DynamicMethod("Deserialize", typeof(object), new[] { typeof(object), typeof(JsonReader).MakeByRefType(), typeof(IJsonFormatterResolver) }, type.Module, true);
+                            var il = dm.GetILGenerator();
+
+                            // delegate object DeserializeMethod(object dynamicFormatter, ref JsonReader reader, IJsonFormatterResolver formatterResolver);
+
+                            il.EmitLdarg(0);
+                            il.Emit(OpCodes.Castclass, typeof(IJsonFormatter<>).MakeGenericType(t));
+                            il.EmitLdarg(1);
+                            il.EmitLdarg(2);
+
+                            il.EmitCall(Resolvers.Internal.DynamicObjectTypeBuilder.EmitInfo.Deserialize(t));
+
+                            il.Emit(OpCodes.Castclass, typeof(object));
+                            il.Emit(OpCodes.Ret);
+
+                            formatterAndDelegate = new KeyValuePair<object, DeserializeMethod>(formatter, (DeserializeMethod)dm.CreateDelegate(typeof(DeserializeMethod)));
+                        }
+
+                        deserializers.TryAdd(t, formatterAndDelegate);
+                    }
+                }
+            }
+
+            return formatterAndDelegate.Value(formatterAndDelegate.Key, ref reader, formatterResolver);
+        }
+    }
+    public class UnknownTypeException : Exception
+    {
+        public UnknownTypeException(string typeName) : base("unknown type " + typeName)
+        {
         }
     }
 }

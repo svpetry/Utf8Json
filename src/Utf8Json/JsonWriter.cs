@@ -37,6 +37,13 @@ namespace Utf8Json
             this.offset += offset;
         }
 
+        public static byte[] GetEncodedString(string str)
+        {
+            var writer = new JsonWriter();
+            writer.WriteString(str);
+            return writer.ToUtf8ByteArray();
+        }
+
         public static byte[] GetEncodedPropertyName(string propertyName)
         {
             var writer = new JsonWriter();
@@ -218,6 +225,23 @@ namespace Utf8Json
             buffer[offset + 2] = (byte)'l';
             buffer[offset + 3] = (byte)'l';
             offset += 4;
+        }
+
+#if NETSTANDARD
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#endif
+        public void WriteTypeName()
+        {
+            BinaryUtil.EnsureCapacity(ref buffer, offset, 8);
+            buffer[offset + 0] = (byte)'"';
+            buffer[offset + 1] = (byte)'$';
+            buffer[offset + 2] = (byte)'t';
+            buffer[offset + 3] = (byte)'y';
+            buffer[offset + 4] = (byte)'p';
+            buffer[offset + 5] = (byte)'e';
+            buffer[offset + 6] = (byte)'"';
+            buffer[offset + 7] = (byte)':';
+            offset += 8;
         }
 
 #if NETSTANDARD

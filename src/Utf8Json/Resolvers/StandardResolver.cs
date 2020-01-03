@@ -72,13 +72,13 @@ namespace Utf8Json.Resolvers.Internal
 
             static FormatterCache()
             {
-                if (typeof(T) == typeof(object))
+                if (typeof(T).IsSealed || typeof(T).IsGenericType)
                 {
-                    formatter = (IJsonFormatter<T>)fallbackFormatter;
+                    formatter = InnerResolver.Instance.GetFormatter<T>();
                 }
                 else
                 {
-                    formatter = InnerResolver.Instance.GetFormatter<T>();
+                    formatter = new DynamicObjectTypeFallbackFormatterAdapter<T>(fallbackFormatter);
                 }
             }
         }

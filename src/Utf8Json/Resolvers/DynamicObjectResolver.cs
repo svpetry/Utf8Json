@@ -581,22 +581,24 @@ namespace Utf8Json.Resolvers.Internal
         {
             if (ignoreTypes.Contains(type)) return null;
 
-            var serializationInfo = new MetaType(type, nameMutator, false); // allowPrivate:false
+            var serializationInfo = new MetaType(type, nameMutator, true); // allowPrivate:true
             var hasShouldSerialize = serializationInfo.Members.Any(x => x.ShouldSerializeMethodInfo != null);
 
             var formatterType = typeof(IJsonFormatter<>).MakeGenericType(type);
             var typeBuilder = assembly.DefineType("Utf8Json.Formatters." + SubtractFullNameRegex.Replace(type.FullName, "").Replace(".", "_") + "Formatter" + Interlocked.Increment(ref nameSequence), TypeAttributes.Public | TypeAttributes.Sealed, null, new[] { formatterType });
 
+            FieldBuilder typeNameField;
             FieldBuilder stringByteKeysField;
             Dictionary<MetaMember, FieldInfo> customFormatterLookup;
 
             // for serialize, bake cache.
             {
                 var method = typeBuilder.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, Type.EmptyTypes);
+                typeNameField = typeBuilder.DefineField("typeName", typeof(byte[]), FieldAttributes.Private | FieldAttributes.InitOnly);
                 stringByteKeysField = typeBuilder.DefineField("stringByteKeys", typeof(byte[][]), FieldAttributes.Private | FieldAttributes.InitOnly);
 
                 var il = method.GetILGenerator();
-                customFormatterLookup = BuildConstructor(typeBuilder, serializationInfo, method, stringByteKeysField, il, excludeNull, hasShouldSerialize);
+                customFormatterLookup = BuildConstructor(typeBuilder, serializationInfo, method, typeNameField, stringByteKeysField, il, excludeNull, hasShouldSerialize);
             }
 
             {
@@ -606,6 +608,10 @@ namespace Utf8Json.Resolvers.Internal
 
                 var il = method.GetILGenerator();
                 BuildSerialize(type, serializationInfo, il, () =>
+                {
+                    il.EmitLoadThis();
+                    il.EmitLdfld(typeNameField);
+                }, () => 
                 {
                     il.EmitLoadThis();
                     il.EmitLdfld(stringByteKeysField);
@@ -724,6 +730,9 @@ namespace Utf8Json.Resolvers.Internal
             {
                 var il = serialize.GetILGenerator();
                 BuildSerialize(type, serializationInfo, il, () =>
+                {
+                    il.EmitLdarg(0);
+                }, () =>
                  {
                      il.EmitLdarg(0);
                  }, (index, member) =>
@@ -762,10 +771,19 @@ namespace Utf8Json.Resolvers.Internal
                 new[] { stringByteKeysField.ToArray(), serializeCustomFormatters.ToArray(), deserializeCustomFormatters.ToArray(), serializeDelegate, deserializeDelegate });
         }
 
-        static Dictionary<MetaMember, FieldInfo> BuildConstructor(TypeBuilder builder, MetaType info, ConstructorInfo method, FieldBuilder stringByteKeysField, ILGenerator il, bool excludeNull, bool hasShouldSerialize)
+        static Dictionary<MetaMember, FieldInfo> BuildConstructor(TypeBuilder builder, MetaType info, ConstructorInfo method, FieldBuilder typeNameField, FieldBuilder stringByteKeysField, ILGenerator il, bool excludeNull, bool hasShouldSerialize)
         {
             il.EmitLdarg(0);
             il.Emit(OpCodes.Call, EmitInfo.ObjectCtor);
+
+            var typeName = info.Type.AssemblyQualifiedName;
+            var commaPos = typeName.IndexOf(',', typeName.IndexOf(',') + 1);
+            typeName = typeName.Substring(0, commaPos);
+
+            il.EmitLdarg(0);
+            il.Emit(OpCodes.Ldstr, typeName);
+            il.EmitCall(EmitInfo.JsonWriter.GetEncodedString);
+            il.Emit(OpCodes.Stfld, typeNameField);
 
             var writeCount = info.Members.Count(x => x.IsReadable);
             il.EmitLdarg(0);
@@ -786,7 +804,7 @@ namespace Utf8Json.Resolvers.Internal
                 {
                     if (i == 0)
                     {
-                        il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyNameWithBeginObject);
+                        il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyName);
                     }
                     else
                     {
@@ -857,7 +875,7 @@ namespace Utf8Json.Resolvers.Internal
             return dict;
         }
 
-        static void BuildSerialize(Type type, MetaType info, ILGenerator il, Action emitStringByteKeys, Func<int, MetaMember, bool> tryEmitLoadCustomFormatter, bool excludeNull, bool hasShouldSerialize, int firstArgIndex)
+        static void BuildSerialize(Type type, MetaType info, ILGenerator il, Action emitTypeNameBytes, Action emitStringByteKeys, Func<int, MetaMember, bool> tryEmitLoadCustomFormatter, bool excludeNull, bool hasShouldSerialize, int firstArgIndex)
         {
             var argWriter = new ArgumentField(il, firstArgIndex);
             var argValue = new ArgumentField(il, firstArgIndex + 1, type);
@@ -948,10 +966,21 @@ namespace Utf8Json.Resolvers.Internal
             {
                 // wrote = false; writer.WriteBeginObject();
                 wrote = il.DeclareLocal(typeof(bool));
-                argWriter.EmitLoad();
-                il.EmitCall(EmitInfo.JsonWriter.WriteBeginObject);
                 labels = info.Members.Where(x => x.IsReadable).Select(_ => il.DefineLabel()).ToArray();
             }
+
+            // WriteBeginObject
+            argWriter.EmitLoad();
+            il.EmitCall(EmitInfo.JsonWriter.WriteBeginObject);
+
+            // write type name
+            argWriter.EmitLoad();
+            il.EmitCall(EmitInfo.JsonWriter.WriteTypeName);
+            argWriter.EmitLoad();
+            emitTypeNameBytes();
+            il.EmitCall(EmitInfo.UnsafeMemory_MemoryCopy);
+            argWriter.EmitLoad();
+            il.EmitCall(EmitInfo.JsonWriter.WriteValueSeparator);
 
             var index = 0;
             foreach (var item in info.Members.Where(x => x.IsReadable))
@@ -1019,7 +1048,7 @@ namespace Utf8Json.Resolvers.Internal
                 }
                 else
                 {
-                    rawField = (index == 0) ? JsonWriter.GetEncodedPropertyNameWithBeginObject(item.Name) : JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator(item.Name);
+                    rawField = (index == 0) ? JsonWriter.GetEncodedPropertyName(item.Name) : JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator(item.Name);
                 }
                 if (rawField.Length < 32)
                 {
@@ -1048,12 +1077,12 @@ namespace Utf8Json.Resolvers.Internal
 
             il.MarkLabel(endObjectLabel);
 
-            // for case of empty
-            if (!excludeNull && index == 0)
-            {
-                argWriter.EmitLoad();
-                il.EmitCall(EmitInfo.JsonWriter.WriteBeginObject);
-            }
+            //// for case of empty
+            //if (!excludeNull && index == 0)
+            //{
+            //    argWriter.EmitLoad();
+            //    il.EmitCall(EmitInfo.JsonWriter.WriteBeginObject);
+            //}
 
             argWriter.EmitLoad();
             il.EmitCall(EmitInfo.JsonWriter.WriteEndObject);
@@ -1526,8 +1555,11 @@ namespace Utf8Json.Resolvers.Internal
 
                 public static readonly MethodInfo GetEncodedPropertyNameWithoutQuotation = ExpressionUtility.GetMethodInfo(() => Utf8Json.JsonWriter.GetEncodedPropertyNameWithoutQuotation(default(string)));
 
+                public static readonly MethodInfo GetEncodedString = ExpressionUtility.GetMethodInfo(() => Utf8Json.JsonWriter.GetEncodedString(default(string)));
+                
                 public static readonly MethodInfo GetEncodedPropertyName = ExpressionUtility.GetMethodInfo(() => Utf8Json.JsonWriter.GetEncodedPropertyName(default(string)));
 
+                public static readonly MethodInfo WriteTypeName = ExpressionUtility.GetMethodInfo((Utf8Json.JsonWriter writer) => writer.WriteTypeName());
                 public static readonly MethodInfo WriteNull = ExpressionUtility.GetMethodInfo((Utf8Json.JsonWriter writer) => writer.WriteNull());
                 public static readonly MethodInfo WriteRaw = ExpressionUtility.GetMethodInfo((Utf8Json.JsonWriter writer) => writer.WriteRaw(default(byte[])));
                 public static readonly MethodInfo WriteBeginObject = ExpressionUtility.GetMethodInfo((Utf8Json.JsonWriter writer) => writer.WriteBeginObject());

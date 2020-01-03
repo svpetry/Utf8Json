@@ -341,6 +341,19 @@ namespace Utf8Json
             throw CreateParsingException("null");
         }
 
+        public string ReadTypeName()
+        {
+            SkipWhiteSpace();
+
+            var startOffset = offset;
+            if (!ReadIsBeginObject()) return null;
+            if (ReadPropertyName() != "$type") throw new JsonParsingException("$type missing");
+            var typeName = ReadString();
+
+            offset = startOffset;
+            return typeName;
+        }
+
         public bool ReadIsBeginArray()
         {
             SkipWhiteSpace();
