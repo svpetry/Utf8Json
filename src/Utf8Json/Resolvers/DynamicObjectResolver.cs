@@ -776,9 +776,7 @@ namespace Utf8Json.Resolvers.Internal
             il.EmitLdarg(0);
             il.Emit(OpCodes.Call, EmitInfo.ObjectCtor);
 
-            var typeName = info.Type.AssemblyQualifiedName;
-            var commaPos = typeName.IndexOf(',', typeName.IndexOf(',') + 1);
-            typeName = typeName.Substring(0, commaPos);
+            var typeName = SubtractFullNameRegex.Replace(info.Type.AssemblyQualifiedName, "");
 
             il.EmitLdarg(0);
             il.Emit(OpCodes.Ldstr, typeName);
@@ -973,17 +971,22 @@ namespace Utf8Json.Resolvers.Internal
             argWriter.EmitLoad();
             il.EmitCall(EmitInfo.JsonWriter.WriteBeginObject);
 
+            var readableMembers = info.Members.Where(x => x.IsReadable).ToList();
+
             // write type name
             argWriter.EmitLoad();
             il.EmitCall(EmitInfo.JsonWriter.WriteTypeName);
             argWriter.EmitLoad();
             emitTypeNameBytes();
             il.EmitCall(EmitInfo.UnsafeMemory_MemoryCopy);
-            argWriter.EmitLoad();
-            il.EmitCall(EmitInfo.JsonWriter.WriteValueSeparator);
+            if (readableMembers.Count > 0)
+            {
+                argWriter.EmitLoad();
+                il.EmitCall(EmitInfo.JsonWriter.WriteValueSeparator);
+            }
 
             var index = 0;
-            foreach (var item in info.Members.Where(x => x.IsReadable))
+            foreach (var item in readableMembers)
             {
                 if (excludeNull || hasShouldSerialize)
                 {

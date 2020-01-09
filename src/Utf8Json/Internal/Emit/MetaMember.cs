@@ -13,6 +13,9 @@ namespace Utf8Json.Internal.Emit
         private static readonly List<Func<object, object>> getterDelegates = new List<Func<object, object>>();
         private static readonly List<Action<object, object>> setterDelegates = new List<Action<object, object>>();
 
+        public static readonly List<string> GetterFieldNames = new List<string>();
+        public static readonly List<string> SetterFieldNames = new List<string>();
+
         public static MethodInfo GetNonPublicFieldMethod;
 
         public static MethodInfo SetNonPublicFieldMethod;
@@ -145,7 +148,7 @@ namespace Utf8Json.Internal.Emit
                 else
                 {
                     // generate dynamic method to get nonpublic field value
-                    var dynMethod = new DynamicMethod("Get" + FieldInfo.Name, typeof(object), new[] { typeof(object) }, ParentType);
+                    var dynMethod = new DynamicMethod("Get" + FieldInfo.Name, typeof(object), new[] { typeof(object) }, ParentType, true);
                     var ilGen = dynMethod.GetILGenerator();
 
                     ilGen.Emit(OpCodes.Ldarg_0);
@@ -153,7 +156,8 @@ namespace Utf8Json.Internal.Emit
                     ilGen.Emit(OpCodes.Ret);
 
                     var idx = NonPublicFieldAccessor.AddGetterDelegate(dynMethod.CreateDelegate(typeof(Func<object, object>)));
-                    
+                    NonPublicFieldAccessor.GetterFieldNames.Add(FieldInfo.Name);
+
                     il.EmitLdc_I4(idx);
                     il.Emit(OpCodes.Call, NonPublicFieldAccessor.GetNonPublicFieldMethod);
                 }
@@ -175,7 +179,7 @@ namespace Utf8Json.Internal.Emit
                 else
                 {
                     // generate dynamic method to set nonpublic field value
-                    var dynMethod = new DynamicMethod("Set" + FieldInfo.Name, null, new[] { typeof(object), typeof(object) }, ParentType);
+                    var dynMethod = new DynamicMethod("Set" + FieldInfo.Name, null, new[] { typeof(object), typeof(object) }, ParentType, true);
                     var ilGen = dynMethod.GetILGenerator();
 
                     ilGen.Emit(OpCodes.Ldarg_0);
@@ -185,6 +189,7 @@ namespace Utf8Json.Internal.Emit
                     ilGen.Emit(OpCodes.Ret);
 
                     var idx = NonPublicFieldAccessor.AddSetterDelegate(dynMethod.CreateDelegate(typeof(Action<object, object>)));
+                    NonPublicFieldAccessor.SetterFieldNames.Add(FieldInfo.Name);
 
                     il.EmitBoxOrDoNothing(FieldInfo.FieldType);
                     il.EmitLdc_I4(idx);
