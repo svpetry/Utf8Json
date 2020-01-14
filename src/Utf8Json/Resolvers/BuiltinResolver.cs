@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using System.Text;
 using Utf8Json.Formatters;
@@ -84,6 +85,7 @@ namespace Utf8Json.Resolvers
                 {typeof(Version), VersionFormatter.Default},
                 {typeof(StringBuilder), StringBuilderFormatter.Default},
                 {typeof(BitArray), BitArrayFormatter.Default},
+                {typeof(MemoryStream), MemoryStreamFormatter.Default},
                 {typeof(Type), TypeFormatter.Default},
             
                 // special primitive

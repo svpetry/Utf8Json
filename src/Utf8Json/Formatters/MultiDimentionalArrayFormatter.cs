@@ -4,7 +4,7 @@ namespace Utf8Json.Formatters
 {
     // multi dimentional array serialize to [[seq], [seq]]
 
-    public sealed class TwoDimentionalArrayFormatter<T> : IJsonFormatter<T[,]>
+    public sealed class TwoDimensionalArrayFormatter<T> : IJsonFormatter<T[,]>
     {
         public void Serialize(ref JsonWriter writer, T[,] value, IJsonFormatterResolver formatterResolver)
         {
@@ -72,7 +72,7 @@ namespace Utf8Json.Formatters
         }
     }
 
-    public sealed class ThreeDimentionalArrayFormatter<T> : IJsonFormatter<T[,,]>
+    public sealed class ThreeDimensionalArrayFormatter<T> : IJsonFormatter<T[,,]>
     {
         public void Serialize(ref JsonWriter writer, T[,,] value, IJsonFormatterResolver formatterResolver)
         {
@@ -160,7 +160,7 @@ namespace Utf8Json.Formatters
         }
     }
 
-    public sealed class FourDimentionalArrayFormatter<T> : IJsonFormatter<T[,,,]>
+    public sealed class FourDimensionalArrayFormatter<T> : IJsonFormatter<T[,,,]>
     {
         public void Serialize(ref JsonWriter writer, T[,,,] value, IJsonFormatterResolver formatterResolver)
         {

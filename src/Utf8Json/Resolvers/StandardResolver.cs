@@ -72,7 +72,7 @@ namespace Utf8Json.Resolvers.Internal
 
             static FormatterCache()
             {
-                if (typeof(T).IsSealed || typeof(T).Assembly.FullName.StartsWith("System"))
+                if (typeof(T) != typeof(object) && (typeof(T).IsSealed || typeof(T).FullName.StartsWith("System")))
                 {
                     formatter = InnerResolver.Instance.GetFormatter<T>();
                 }

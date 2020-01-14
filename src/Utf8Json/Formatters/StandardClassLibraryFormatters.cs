@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using Utf8Json.Formatters.Internal;
 using Utf8Json.Internal;
@@ -473,6 +474,25 @@ namespace Utf8Json.Formatters
                 buffer.Add(reader.ReadBoolean());
             }
             return new BitArray(buffer.ToArray());
+        }
+    }
+
+    public sealed class MemoryStreamFormatter : IJsonFormatter<MemoryStream>
+    {
+        public static readonly IJsonFormatter<MemoryStream> Default = new MemoryStreamFormatter();
+
+        public void Serialize(ref JsonWriter writer, MemoryStream value, IJsonFormatterResolver formatterResolver)
+        {
+            if (value == null) { writer.WriteNull(); return; }
+            writer.WriteString(Convert.ToBase64String(value.ToArray(), Base64FormattingOptions.None));
+        }
+
+        public MemoryStream Deserialize(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
+        {
+            if (reader.ReadIsNull()) return null;
+
+            var str = reader.ReadString();
+            return new MemoryStream(Convert.FromBase64String(str));
         }
     }
 
