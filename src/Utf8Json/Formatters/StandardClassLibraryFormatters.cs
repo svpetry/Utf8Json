@@ -551,7 +551,7 @@ namespace Utf8Json.Formatters
         }
     }
 
-    public sealed class EnumFormatter : IJsonFormatter<Enum>, IObjectPropertyNameFormatter<Enum>
+    public sealed class EnumFormatter : IJsonFormatter<Enum>
     {
         static readonly Regex SubtractFullNameRegex = new Regex(@", Version=\d+.\d+.\d+.\d+, Culture=\w+, PublicKeyToken=\w+", RegexOptions.Compiled);
 
@@ -604,20 +604,6 @@ namespace Utf8Json.Formatters
             var result = (Enum)Enum.Parse(type, reader.ReadString()); // this is slow!
             reader.ReadIsEndObjectWithVerify();
             return result;
-        }
-
-        public void SerializeToPropertyName(ref JsonWriter writer, Enum value, IJsonFormatterResolver formatterResolver)
-        {
-            // this is slow!
-            var str = JsonSerializer.ToJsonString(value, true);
-            writer.WriteString(str);
-        }
-
-        public Enum DeserializeFromPropertyName(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
-        {
-            // this is slow!
-            var str = reader.ReadString();
-            return JsonSerializer.Deserialize<Enum>(str);
         }
     }
 

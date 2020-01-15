@@ -58,7 +58,8 @@ namespace Utf8Json.Formatters
                         if (e.MoveNext())
                         {
                             var item = e.Current;
-                            writer.WriteString(item.Key.ToString());
+                            // slow, but it works. now any object can be a dictionary key.
+                            writer.WriteString(JsonSerializer.ToJsonString(item.Key, true));
                             writer.WriteNameSeparator();
                             valueFormatter.Serialize(ref writer, item.Value, formatterResolver);
                         }
@@ -71,7 +72,8 @@ namespace Utf8Json.Formatters
                         {
                             writer.WriteValueSeparator();
                             var item = e.Current;
-                            writer.WriteString(item.Key.ToString());
+                            // slow, but it works. now any object can be a dictionary key.
+                            writer.WriteString(JsonSerializer.ToJsonString(item.Key, true));
                             writer.WriteNameSeparator();
                             valueFormatter.Serialize(ref writer, item.Value, formatterResolver);
                         }
@@ -96,7 +98,6 @@ namespace Utf8Json.Formatters
             else
             {
                 var keyFormatter = formatterResolver.GetFormatterWithVerify<TKey>() as IObjectPropertyNameFormatter<TKey>;
-                if (keyFormatter == null) throw new InvalidOperationException(typeof(TKey) + " does not support dictionary key deserialize.");
                 var valueFormatter = formatterResolver.GetFormatterWithVerify<TValue>();
 
                 reader.ReadIsBeginObjectWithVerify();
@@ -105,7 +106,18 @@ namespace Utf8Json.Formatters
                 var i = 0;
                 while (!reader.ReadIsEndObjectWithSkipValueSeparator(ref i))
                 {
-                    var key = keyFormatter.DeserializeFromPropertyName(ref reader, formatterResolver);
+                    TKey key;
+                    if (keyFormatter != null)
+                    {
+                        key = keyFormatter.DeserializeFromPropertyName(ref reader, formatterResolver);
+                    }
+                    else
+                    {
+                        // slow, but it works. now any object can be a dictionary key.
+                        var str = reader.ReadString();
+                        key = JsonSerializer.Deserialize<TKey>(str);
+                    }
+                    
                     reader.ReadIsNameSeparatorWithVerify();
                     var value = valueFormatter.Deserialize(ref reader, formatterResolver);
                     Add(ref dict, i - 1, key, value);

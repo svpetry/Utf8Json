@@ -1130,7 +1130,7 @@ namespace Utf8Json.Resolvers.Internal
         {
             if (info.IsClass && info.BestmatchConstructor == null && !(useGetUninitializedObject && info.IsConcreteClass))
             {
-                il.Emit(OpCodes.Ldstr, "generated serializer for " + type.Name + " does not support deserialize.");
+                il.Emit(OpCodes.Ldstr, "generated serializer for " + type.Name + " does not support deserialize. Parameterless contructor missing?");
                 il.Emit(OpCodes.Newobj, EmitInfo.InvalidOperationExceptionConstructor);
                 il.Emit(OpCodes.Throw);
                 return;

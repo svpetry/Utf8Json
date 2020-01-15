@@ -173,7 +173,7 @@ namespace Utf8Json
         {
             if (resolver == null) resolver = DefaultResolver;
 
-            var writer = new JsonWriter(independentBuffer ? new byte[65536] : MemoryPool.GetBuffer());
+            var writer = new JsonWriter(independentBuffer ? new byte[8192] : MemoryPool.GetBuffer());
             var formatter = resolver.GetFormatterWithVerify<T>();
             formatter.Serialize(ref writer, value, resolver);
             return writer.ToString();
