@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
+
 using Utf8Json.Internal;
 using Utf8Json.Internal.Emit;
 
@@ -31,6 +33,8 @@ namespace Utf8Json.Formatters
 
     public sealed class DynamicObjectTypeFallbackFormatter : IJsonFormatter<object>
     {
+        private Dictionary<string, Type> typesByName = new Dictionary<string, Type>();
+
         delegate void SerializeMethod(object dynamicFormatter, ref JsonWriter writer, object value, IJsonFormatterResolver formatterResolver);
         
         delegate object DeserializeMethod(object dynamicFormatter, ref JsonReader reader, IJsonFormatterResolver formatterResolver);
@@ -111,9 +115,9 @@ namespace Utf8Json.Formatters
         {
             if (reader.ReadIsNull()) return null;
 
-            var typeName = reader.ReadTypeName();
+            var typeName = reader.ReadTypeNameWithVerify();
             if (typeName == null) return null;
-            var type = Type.GetType(typeName);
+            var type = GetTypeFast(typeName);
             if (type == null) throw new UnknownTypeException(typeName);
 
             KeyValuePair<object, DeserializeMethod> formatterAndDelegate;
@@ -160,6 +164,16 @@ namespace Utf8Json.Formatters
             }
 
             return formatterAndDelegate.Value(formatterAndDelegate.Key, ref reader, formatterResolver);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private Type GetTypeFast(string typeName)
+        {
+            Type type;
+            if (typesByName.TryGetValue(typeName, out type)) return type;
+            type = Type.GetType(typeName);
+            typesByName.Add(typeName, type);
+            return type;
         }
     }
     public class UnknownTypeException : Exception

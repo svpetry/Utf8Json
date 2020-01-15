@@ -161,19 +161,19 @@ namespace Utf8Json
         /// <summary>
         /// Serialize to JsonString.
         /// </summary>
-        public static string ToJsonString<T>(T value)
+        public static string ToJsonString<T>(T value, bool independentBuffer = false)
         {
-            return ToJsonString(value, defaultResolver);
+            return ToJsonString(value, defaultResolver, independentBuffer);
         }
 
         /// <summary>
         /// Serialize to JsonString with specified resolver.
         /// </summary>
-        public static string ToJsonString<T>(T value, IJsonFormatterResolver resolver)
+        public static string ToJsonString<T>(T value, IJsonFormatterResolver resolver, bool independentBuffer = false)
         {
             if (resolver == null) resolver = DefaultResolver;
 
-            var writer = new JsonWriter(MemoryPool.GetBuffer());
+            var writer = new JsonWriter(independentBuffer ? new byte[65536] : MemoryPool.GetBuffer());
             var formatter = resolver.GetFormatterWithVerify<T>();
             formatter.Serialize(ref writer, value, resolver);
             return writer.ToString();

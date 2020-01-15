@@ -87,6 +87,7 @@ namespace Utf8Json.Resolvers
                 {typeof(BitArray), BitArrayFormatter.Default},
                 {typeof(MemoryStream), MemoryStreamFormatter.Default},
                 {typeof(Type), TypeFormatter.Default},
+                {typeof(Enum), EnumFormatter.Default},
             
                 // special primitive
                 {typeof(byte[]), ByteArrayFormatter.Default},

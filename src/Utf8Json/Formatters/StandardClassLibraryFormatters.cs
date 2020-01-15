@@ -8,6 +8,7 @@ using Utf8Json.Formatters.Internal;
 using Utf8Json.Internal;
 using System.Text.RegularExpressions;
 
+using Utf8Json.Resolvers.Internal;
 #if NETSTANDARD
 using System.Dynamic;
 using System.Numerics;
@@ -547,6 +548,76 @@ namespace Utf8Json.Formatters
             }
 
             return Type.GetType(s, throwOnError);
+        }
+    }
+
+    public sealed class EnumFormatter : IJsonFormatter<Enum>, IObjectPropertyNameFormatter<Enum>
+    {
+        static readonly Regex SubtractFullNameRegex = new Regex(@", Version=\d+.\d+.\d+.\d+, Culture=\w+, PublicKeyToken=\w+", RegexOptions.Compiled);
+
+        private const string valueName = "$value";
+
+        public static readonly IJsonFormatter<Enum> Default = new EnumFormatter();
+
+        private Dictionary<Type, string> typeNames = new Dictionary<Type, string>();
+
+        private Dictionary<string, Type> typesByName = new Dictionary<string, Type>();
+
+        public void Serialize(ref JsonWriter writer, Enum value, IJsonFormatterResolver formatterResolver)
+        {
+            string typeName;
+            var type = value.GetType();
+            if (!typeNames.TryGetValue(type, out typeName))
+            {
+                typeName = SubtractFullNameRegex.Replace(type.AssemblyQualifiedName, "");
+                typeNames.Add(type, typeName);
+                typesByName.Add(typeName, type);
+            }
+
+            writer.WriteBeginObject();
+            writer.WriteTypeName();
+            writer.WriteString(typeName);
+            writer.WriteValueSeparator();
+            writer.WritePropertyName(valueName);
+            writer.WriteString(value.ToString()); // this is slow!
+            writer.WriteEndObject();
+        }
+
+        public Enum Deserialize(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
+        {
+            if (!reader.ReadIsBeginObject()) return null;
+            if (reader.ReadPropertyName() != "$type") throw new JsonParsingException("$type missing");
+            var typeName = reader.ReadString();
+
+            reader.ReadIsValueSeparatorWithVerify();
+            if (reader.ReadPropertyName() != valueName) throw new JsonParsingException("expected " + valueName);
+
+            Type type;
+            if (!typesByName.TryGetValue(typeName, out type))
+            {
+                type = Type.GetType(typeName);
+                if (type == null) throw new InvalidOperationException("unknown type " + typeName);
+                typeNames.Add(type, typeName);
+                typesByName.Add(typeName, type);
+            }
+
+            var result = (Enum)Enum.Parse(type, reader.ReadString()); // this is slow!
+            reader.ReadIsEndObjectWithVerify();
+            return result;
+        }
+
+        public void SerializeToPropertyName(ref JsonWriter writer, Enum value, IJsonFormatterResolver formatterResolver)
+        {
+            // this is slow!
+            var str = JsonSerializer.ToJsonString(value, true);
+            writer.WriteString(str);
+        }
+
+        public Enum DeserializeFromPropertyName(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
+        {
+            // this is slow!
+            var str = reader.ReadString();
+            return JsonSerializer.Deserialize<Enum>(str);
         }
     }
 

@@ -341,7 +341,7 @@ namespace Utf8Json
             throw CreateParsingException("null");
         }
 
-        public string ReadTypeName()
+        public string ReadTypeNameWithVerify()
         {
             SkipWhiteSpace();
 
