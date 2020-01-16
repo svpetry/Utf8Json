@@ -168,7 +168,30 @@ namespace Utf8Json.Internal.Emit
         {
             if (IsProperty)
             {
-                il.EmitCall(setMethod);
+                if (setMethod.IsPublic)
+                {
+                    il.EmitCall(setMethod);
+                }
+                else
+                {
+                    // generate dynamic method to call nonpublic set method
+                    var varType = setMethod.GetParameters()[0].ParameterType;
+                    var dynMethod = new DynamicMethod("Set" + setMethod.Name, null, new[] { typeof(object), typeof(object) }, ParentType, true);
+                    var ilGen = dynMethod.GetILGenerator();
+
+                    ilGen.Emit(OpCodes.Ldarg_0);
+                    ilGen.Emit(OpCodes.Ldarg_1);
+                    ilGen.EmitUnboxOrCast(varType);
+                    ilGen.Emit(OpCodes.Call, setMethod);
+                    ilGen.Emit(OpCodes.Ret);
+
+                    var idx = NonPublicFieldAccessor.AddSetterDelegate(dynMethod.CreateDelegate(typeof(Action<object, object>)));
+                    NonPublicFieldAccessor.SetterFieldNames.Add(setMethod.Name);
+
+                    il.EmitBoxOrDoNothing(varType);
+                    il.EmitLdc_I4(idx);
+                    il.Emit(OpCodes.Call, NonPublicFieldAccessor.SetNonPublicFieldMethod);
+                }
             }
             else
             {

@@ -539,11 +539,11 @@ namespace Utf8Json.Resolvers.Internal
             Type elementType;
             if (typeof(Exception).GetTypeInfo().IsAssignableFrom(ti))
             {
-                return DynamicObjectTypeBuilder.BuildAnonymousFormatter(typeof(T), nameMutator, excludeNull, false, true);
+                return DynamicObjectTypeBuilder.BuildAnonymousFormatter(typeof(T), nameMutator, excludeNull, true, true);
             }
             else if (ti.IsAnonymous() || TryGetInterfaceEnumerableElementType(typeof(T), out elementType))
             {
-                return DynamicObjectTypeBuilder.BuildAnonymousFormatter(typeof(T), nameMutator, excludeNull, false, false);
+                return DynamicObjectTypeBuilder.BuildAnonymousFormatter(typeof(T), nameMutator, excludeNull, true, false);
             }
 
             var formatterTypeInfo = DynamicObjectTypeBuilder.BuildType(assembly, typeof(T), nameMutator, excludeNull);
@@ -569,7 +569,7 @@ namespace Utf8Json.Resolvers.Internal
             }
             if (typeof(Exception).GetTypeInfo().IsAssignableFrom(ti))
             {
-                return DynamicObjectTypeBuilder.BuildAnonymousFormatter(typeof(T), nameMutator, excludeNull, false, true);
+                return DynamicObjectTypeBuilder.BuildAnonymousFormatter(typeof(T), nameMutator, excludeNull, true, true);
             }
             else
             {
@@ -679,21 +679,23 @@ namespace Utf8Json.Resolvers.Internal
             var i = 0;
             foreach (var item in serializationInfo.Members.Where(x => x.IsReadable))
             {
-                if (excludeNull || hasShouldSerialize)
-                {
-                    stringByteKeysField.Add(JsonWriter.GetEncodedPropertyName(item.Name));
-                }
-                else
-                {
-                    if (i == 0)
-                    {
-                        stringByteKeysField.Add(JsonWriter.GetEncodedPropertyNameWithBeginObject(item.Name));
-                    }
-                    else
-                    {
-                        stringByteKeysField.Add(JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator(item.Name));
-                    }
-                }
+                stringByteKeysField.Add(JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator(item.Name));
+
+                //if (excludeNull || hasShouldSerialize)
+                //{
+                //    stringByteKeysField.Add(JsonWriter.GetEncodedPropertyName(item.Name));
+                //}
+                //else
+                //{
+                //    if (i == 0)
+                //    {
+                //        stringByteKeysField.Add(JsonWriter.GetEncodedPropertyNameWithBeginObject(item.Name));
+                //    }
+                //    else
+                //    {
+                //        stringByteKeysField.Add(JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator(item.Name));
+                //    }
+                //}
                 i++;
             }
 
@@ -730,9 +732,11 @@ namespace Utf8Json.Resolvers.Internal
             {
                 var il = serialize.GetILGenerator();
                 BuildSerialize(type, serializationInfo, il, () =>
-                {
-                    il.EmitLdarg(0);
-                }, () =>
+                 {
+                     var typeName = SubtractFullNameRegex.Replace(type.AssemblyQualifiedName, "");
+                     il.Emit(OpCodes.Ldstr, typeName);
+                     il.EmitCall(EmitInfo.JsonWriter.GetEncodedString);
+                 }, () =>
                  {
                      il.EmitLdarg(0);
                  }, (index, member) =>
@@ -794,21 +798,22 @@ namespace Utf8Json.Resolvers.Internal
                 il.Emit(OpCodes.Dup);
                 il.EmitLdc_I4(i);
                 il.Emit(OpCodes.Ldstr, item.Name);
-                if (excludeNull || hasShouldSerialize)
-                {
-                    il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyName);
-                }
-                else
-                {
-                    if (i == 0)
-                    {
-                        il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyName);
-                    }
-                    else
-                    {
-                        il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator);
-                    }
-                }
+                il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator);
+                //if (excludeNull || hasShouldSerialize)
+                //{
+                //    il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyName);
+                //}
+                //else
+                //{
+                //    if (i == 0)
+                //    {
+                //        il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyName);
+                //    }
+                //    else
+                //    {
+                //        il.EmitCall(EmitInfo.JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator);
+                //    }
+                //}
 
                 il.Emit(OpCodes.Stelem_Ref);
                 i++;
@@ -979,11 +984,6 @@ namespace Utf8Json.Resolvers.Internal
             argWriter.EmitLoad();
             emitTypeNameBytes();
             il.EmitCall(EmitInfo.UnsafeMemory_MemoryCopy);
-            if (readableMembers.Count > 0)
-            {
-                argWriter.EmitLoad();
-                il.EmitCall(EmitInfo.JsonWriter.WriteValueSeparator);
-            }
 
             var index = 0;
             foreach (var item in readableMembers)
@@ -1031,8 +1031,8 @@ namespace Utf8Json.Resolvers.Internal
                     il.Emit(OpCodes.Br, toWrite);
 
                     il.MarkLabel(flagTrue);
-                    argWriter.EmitLoad();
-                    il.EmitCall(EmitInfo.JsonWriter.WriteValueSeparator);
+                    //argWriter.EmitLoad();
+                    //il.EmitCall(EmitInfo.JsonWriter.WriteValueSeparator);
 
                     il.MarkLabel(toWrite);
                 }
@@ -1045,14 +1045,15 @@ namespace Utf8Json.Resolvers.Internal
 #if NETSTANDARD
                 // same as in constructor
                 byte[] rawField;
-                if (excludeNull || hasShouldSerialize)
-                {
-                    rawField = JsonWriter.GetEncodedPropertyName(item.Name);
-                }
-                else
-                {
-                    rawField = (index == 0) ? JsonWriter.GetEncodedPropertyName(item.Name) : JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator(item.Name);
-                }
+                //if (excludeNull || hasShouldSerialize)
+                //{
+                //    rawField = JsonWriter.GetEncodedPropertyName(item.Name);
+                //}
+                //else
+                //{
+                //    rawField = (index == 0) ? JsonWriter.GetEncodedPropertyName(item.Name) : JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator(item.Name);
+                //}
+                rawField = JsonWriter.GetEncodedPropertyNameWithPrefixValueSeparator(item.Name);
                 if (rawField.Length < 32)
                 {
                     if (UnsafeMemory.Is32Bit)
