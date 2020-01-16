@@ -153,6 +153,7 @@ namespace Utf8Json.Internal.Emit
 
                     ilGen.Emit(OpCodes.Ldarg_0);
                     ilGen.Emit(OpCodes.Ldfld, FieldInfo);
+                    ilGen.EmitBoxOrDoNothing(FieldInfo.FieldType);
                     ilGen.Emit(OpCodes.Ret);
 
                     var idx = NonPublicFieldAccessor.AddGetterDelegate(dynMethod.CreateDelegate(typeof(Func<object, object>)));
@@ -160,6 +161,7 @@ namespace Utf8Json.Internal.Emit
 
                     il.EmitLdc_I4(idx);
                     il.Emit(OpCodes.Call, NonPublicFieldAccessor.GetNonPublicFieldMethod);
+                    il.EmitUnboxOrCast(FieldInfo.FieldType);
                 }
             }
         }
