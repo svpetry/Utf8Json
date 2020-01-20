@@ -10,14 +10,13 @@ namespace Utf8Json.Internal.Emit
 {
     public static class NonPublicFieldAccessor
     {
-        private static readonly List<Func<object, object>> getterDelegates = new List<Func<object, object>>();
-        private static readonly List<Action<object, object>> setterDelegates = new List<Action<object, object>>();
+        private static readonly List<Func<object, object>> getterDelegates = new List<Func<object, object>>(8192);
+        private static readonly List<Action<object, object>> setterDelegates = new List<Action<object, object>>(8192);
 
         public static readonly List<string> GetterFieldNames = new List<string>();
         public static readonly List<string> SetterFieldNames = new List<string>();
 
         public static MethodInfo GetNonPublicFieldMethod;
-
         public static MethodInfo SetNonPublicFieldMethod;
 
         static NonPublicFieldAccessor()
@@ -28,14 +27,20 @@ namespace Utf8Json.Internal.Emit
 
         public static int AddGetterDelegate(Delegate del)
         {
-            getterDelegates.Add((Func<object, object>)del);
-            return getterDelegates.Count - 1;
+            lock (getterDelegates)
+            {
+                getterDelegates.Add((Func<object, object>)del);
+                return getterDelegates.Count - 1;
+            }
         }
 
         public static int AddSetterDelegate(Delegate del)
         {
-            setterDelegates.Add((Action<object, object>)del);
-            return setterDelegates.Count - 1;
+            lock (setterDelegates)
+            {
+                setterDelegates.Add((Action<object, object>)del);
+                return setterDelegates.Count - 1;
+            }
         }
 
         public static object GetNonPublicField(object obj, int delegateIdx)
@@ -95,9 +100,9 @@ namespace Utf8Json.Internal.Emit
         {
             this.ParentType = parentType;
 
-            this.getMethod = info.GetGetMethod(true);
-            this.setMethod = info.GetSetMethod(true);
-
+            this.getMethod = GetGetMethod(parentType, info);
+            this.setMethod = GetSetMethod(parentType, info);
+ 
             this.Name = name;
             this.MemberName = info.Name;
             this.PropertyInfo = info;
@@ -105,6 +110,36 @@ namespace Utf8Json.Internal.Emit
             this.IsReadable = (getMethod != null) && (allowPrivate || getMethod.IsPublic) && !getMethod.IsStatic;
             this.IsWritable = (setMethod != null) && (allowPrivate || setMethod.IsPublic) && !setMethod.IsStatic;
             this.ShouldSerializeMethodInfo = GetShouldSerialize(info);
+        }
+
+        private MethodInfo GetGetMethod(Type type, PropertyInfo info)
+        {
+            MethodInfo result;
+            do
+            {
+                result = info.GetGetMethod(true);
+                if (result != null) return result;
+                type = type.BaseType;
+                info = type.GetProperty(info.Name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            }
+            while (info != null);
+
+            return null;
+        }
+
+        private MethodInfo GetSetMethod(Type type, PropertyInfo info)
+        {
+            MethodInfo result;
+            do
+            {
+                result = info.GetSetMethod(true);
+                if (result != null) return result;
+                type = type.BaseType;
+                info = type.GetProperty(info.Name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            }
+            while (info != null);
+
+            return null;
         }
 
         static MethodInfo GetShouldSerialize(MemberInfo info)
@@ -137,7 +172,29 @@ namespace Utf8Json.Internal.Emit
         {
             if (IsProperty)
             {
-                il.EmitCall(getMethod);
+                if (getMethod.IsPublic)
+                {
+                    il.EmitCall(getMethod);
+                }
+                else
+                {
+                    // generate dynamic method to call nonpublic get method
+                    var varType = getMethod.ReturnType;
+                    var dynMethod = new DynamicMethod("Get" + getMethod.Name, typeof(object), new[] { typeof(object) }, ParentType, true);
+                    var ilGen = dynMethod.GetILGenerator();
+
+                    ilGen.Emit(OpCodes.Ldarg_0);
+                    ilGen.Emit(OpCodes.Call, getMethod);
+                    ilGen.EmitBoxOrDoNothing(varType);
+                    ilGen.Emit(OpCodes.Ret);
+
+                    var idx = NonPublicFieldAccessor.AddGetterDelegate(dynMethod.CreateDelegate(typeof(Func<object, object>)));
+                    NonPublicFieldAccessor.GetterFieldNames.Add(getMethod.Name);
+
+                    il.EmitLdc_I4(idx);
+                    il.Emit(OpCodes.Call, NonPublicFieldAccessor.GetNonPublicFieldMethod);
+                    il.EmitUnboxOrCast(varType);
+                }
             }
             else
             {

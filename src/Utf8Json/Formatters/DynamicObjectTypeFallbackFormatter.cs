@@ -4,9 +4,11 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 
 using Utf8Json.Internal;
 using Utf8Json.Internal.Emit;
+using Utf8Json.Resolvers;
 
 namespace Utf8Json.Formatters
 {
@@ -33,15 +35,17 @@ namespace Utf8Json.Formatters
 
     public sealed class DynamicObjectTypeFallbackFormatter : IJsonFormatter<object>
     {
-        private Dictionary<string, Type> typesByName = new Dictionary<string, Type>();
+        static readonly Regex SubtractFullNameRegex = new Regex(@", Version=\d+.\d+.\d+.\d+, Culture=\w+, PublicKeyToken=\w+", RegexOptions.Compiled);
+
+        private readonly Dictionary<string, Type> typesByName = new Dictionary<string, Type>();
 
         delegate void SerializeMethod(object dynamicFormatter, ref JsonWriter writer, object value, IJsonFormatterResolver formatterResolver);
         
         delegate object DeserializeMethod(object dynamicFormatter, ref JsonReader reader, IJsonFormatterResolver formatterResolver);
 
-        readonly ThreadsafeTypeKeyHashTable<KeyValuePair<object, SerializeMethod>> serializers = new ThreadsafeTypeKeyHashTable<KeyValuePair<object, SerializeMethod>>();
+        readonly ThreadsafeTypeKeyHashTable<KeyValuePair<object, Tuple<SerializeMethod, bool>>> serializers = new ThreadsafeTypeKeyHashTable<KeyValuePair<object, Tuple<SerializeMethod, bool>>>();
 
-        readonly ThreadsafeTypeKeyHashTable<KeyValuePair<object, DeserializeMethod>> deserializers = new ThreadsafeTypeKeyHashTable<KeyValuePair<object, DeserializeMethod>>();
+        readonly ThreadsafeTypeKeyHashTable<KeyValuePair<object, Tuple<DeserializeMethod, bool>>> deserializers = new ThreadsafeTypeKeyHashTable<KeyValuePair<object, Tuple<DeserializeMethod, bool>>>();
 
         readonly IJsonFormatterResolver[] innerResolvers;
 
@@ -64,7 +68,7 @@ namespace Utf8Json.Formatters
                 return;
             }
 
-            KeyValuePair<object, SerializeMethod> formatterAndDelegate;
+            KeyValuePair<object, Tuple<SerializeMethod, bool>> formatterAndDelegate;
             if (!serializers.TryGetValue(type, out formatterAndDelegate))
             {
                 lock (serializers)
@@ -100,7 +104,8 @@ namespace Utf8Json.Formatters
 
                             il.Emit(OpCodes.Ret);
 
-                            formatterAndDelegate = new KeyValuePair<object, SerializeMethod>(formatter, (SerializeMethod)dm.CreateDelegate(typeof(SerializeMethod)));
+                            var writeTypeName = BuiltinResolver.HasFormatter(type);
+                            formatterAndDelegate = new KeyValuePair<object, Tuple<SerializeMethod, bool>>(formatter, Tuple.Create((SerializeMethod)dm.CreateDelegate(typeof(SerializeMethod)), writeTypeName));
                         }
 
                         serializers.TryAdd(t, formatterAndDelegate);
@@ -108,7 +113,22 @@ namespace Utf8Json.Formatters
                 }
             }
 
-            formatterAndDelegate.Value(formatterAndDelegate.Key, ref writer, value, formatterResolver);
+            if (formatterAndDelegate.Value.Item2)
+            {
+                writer.WriteBeginObject();
+                writer.WritePropertyName("$type");
+                var typeName = SubtractFullNameRegex.Replace(type.AssemblyQualifiedName, "");
+                writer.WriteString(typeName);
+                writer.WriteValueSeparator();
+                writer.WritePropertyName("$value");
+            }
+            
+            formatterAndDelegate.Value.Item1(formatterAndDelegate.Key, ref writer, value, formatterResolver);
+
+            if (formatterAndDelegate.Value.Item2)
+            {
+                writer.WriteEndObject();
+            }
         }
 
         public object Deserialize(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
@@ -120,7 +140,7 @@ namespace Utf8Json.Formatters
             var type = GetTypeFast(typeName);
             if (type == null) throw new UnknownTypeException(typeName);
 
-            KeyValuePair<object, DeserializeMethod> formatterAndDelegate;
+            KeyValuePair<object, Tuple<DeserializeMethod, bool>> formatterAndDelegate;
             if (!deserializers.TryGetValue(type, out formatterAndDelegate))
             {
                 lock (deserializers)
@@ -152,10 +172,12 @@ namespace Utf8Json.Formatters
 
                             il.EmitCall(Resolvers.Internal.DynamicObjectTypeBuilder.EmitInfo.Deserialize(t));
 
-                            il.Emit(OpCodes.Castclass, typeof(object));
+                            il.EmitBoxOrDoNothing(type);
+
                             il.Emit(OpCodes.Ret);
 
-                            formatterAndDelegate = new KeyValuePair<object, DeserializeMethod>(formatter, (DeserializeMethod)dm.CreateDelegate(typeof(DeserializeMethod)));
+                            var writeTypeName = BuiltinResolver.HasFormatter(type);
+                            formatterAndDelegate = new KeyValuePair<object, Tuple<DeserializeMethod, bool>>(formatter, Tuple.Create((DeserializeMethod)dm.CreateDelegate(typeof(DeserializeMethod)), writeTypeName));
                         }
 
                         deserializers.TryAdd(t, formatterAndDelegate);
@@ -163,17 +185,36 @@ namespace Utf8Json.Formatters
                 }
             }
 
-            return formatterAndDelegate.Value(formatterAndDelegate.Key, ref reader, formatterResolver);
+            if (formatterAndDelegate.Value.Item2)
+            {
+                reader.ReadIsBeginObjectWithVerify();
+                if (reader.ReadPropertyName() != "$type") throw new JsonParsingException("$type missing");
+                reader.ReadString();
+                reader.ReadIsValueSeparatorWithVerify();
+                if (reader.ReadPropertyName() != "$value") throw new JsonParsingException("$value missing");
+            }
+
+            var value = formatterAndDelegate.Value.Item1(formatterAndDelegate.Key, ref reader, formatterResolver);
+
+            if (formatterAndDelegate.Value.Item2)
+            {
+                reader.ReadIsEndObject();
+            }
+
+            return value;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Type GetTypeFast(string typeName)
         {
-            Type type;
-            if (typesByName.TryGetValue(typeName, out type)) return type;
-            type = Type.GetType(typeName);
-            typesByName.Add(typeName, type);
-            return type;
+            lock (typesByName)
+            {
+                Type type;
+                if (typesByName.TryGetValue(typeName, out type)) return type;
+                type = Type.GetType(typeName);
+                typesByName.Add(typeName, type);
+                return type;
+            }
         }
     }
     public class UnknownTypeException : Exception
