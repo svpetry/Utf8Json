@@ -472,10 +472,19 @@ namespace Utf8Json.Resolvers.Internal
 
     #endregion
 
-    public static class OnDeserializedHelper
+    public static class SerializationEventsHelper
     {
         public static StreamingContext StreamingContext;
-        public static List<Action<object, StreamingContext>> OnDeserializedActions = new List<Action<object, StreamingContext>>(8192);
+        public static List<Action<object, StreamingContext>> SerializationEvents = new List<Action<object, StreamingContext>>(8192);
+
+        static SerializationEventsHelper()
+        {
+            SerializationEventsField = typeof(SerializationEventsHelper).GetField("SerializationEvents", BindingFlags.Static | BindingFlags.Public);
+            StreamingContextField = typeof(SerializationEventsHelper).GetField("StreamingContext", BindingFlags.Static | BindingFlags.Public);
+        }
+
+        public static FieldInfo SerializationEventsField { get; private set; }
+        public static FieldInfo StreamingContextField { get; private set; }
     }
 
     internal static class DynamicObjectTypeBuilder
@@ -992,6 +1001,14 @@ namespace Utf8Json.Resolvers.Internal
             emitTypeNameBytes();
             il.EmitCall(EmitInfo.UnsafeMemory_MemoryCopy);
 
+            // call OnSerializing method
+            if (GetMethodWithAttribute(type, typeof(OnSerializingAttribute)) != null)
+            {
+                argValue.EmitLoad();
+                EmitSerializationEventCall(il, type, typeof(OnSerializingAttribute));
+                il.Emit(OpCodes.Pop);
+            }
+
             var index = 0;
             foreach (var item in readableMembers)
             {
@@ -1094,6 +1111,14 @@ namespace Utf8Json.Resolvers.Internal
             //    argWriter.EmitLoad();
             //    il.EmitCall(EmitInfo.JsonWriter.WriteBeginObject);
             //}
+
+            // call OnSerialized method
+            if (GetMethodWithAttribute(type, typeof(OnSerializedAttribute)) != null)
+            {
+                argValue.EmitLoad();
+                EmitSerializationEventCall(il, type, typeof(OnSerializedAttribute));
+                il.Emit(OpCodes.Pop);
+            }
 
             argWriter.EmitLoad();
             il.EmitCall(EmitInfo.JsonWriter.WriteEndObject);
@@ -1303,23 +1328,23 @@ namespace Utf8Json.Resolvers.Internal
                 il.Emit(OpCodes.Ldloc, localResult);
             }
 
-            EmitOnDeserializedCall(il, type);
+            EmitSerializationEventCall(il, type, typeof(OnDeserializingAttribute));
+            EmitSerializationEventCall(il, type, typeof(OnDeserializedAttribute));
 
             il.Emit(OpCodes.Ret);
         }
 
-        private static void EmitOnDeserializedCall(ILGenerator il, Type type)
+        private static void EmitSerializationEventCall(ILGenerator il, Type type, Type attributeType)
         {
-            var onDeserializedMethod = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                .FirstOrDefault(_ => _.GetCustomAttribute<OnDeserializedAttribute>() != null);
-            if (onDeserializedMethod == null) return;
+            var serializationEventMethod = GetMethodWithAttribute(type, attributeType);
+            if (serializationEventMethod == null) return;
 
-            if (onDeserializedMethod.IsPublic)
+            if (serializationEventMethod.IsPublic)
             {
                 // call public OnDeserialized method
                 il.Emit(OpCodes.Dup);
-                il.Emit(OpCodes.Ldsfld, typeof(OnDeserializedHelper).GetField("StreamingContext"));
-                il.EmitCall(onDeserializedMethod);
+                il.Emit(OpCodes.Ldsfld, typeof(SerializationEventsHelper).GetField("StreamingContext"));
+                il.EmitCall(serializationEventMethod);
                 return;
             }
 
@@ -1328,31 +1353,36 @@ namespace Utf8Json.Resolvers.Internal
             il.Emit(OpCodes.Dup);
             il.EmitStloc(resultingObj);
 
-            var dynMethod = new DynamicMethod("CallOnDeserialized", typeof(void), new[] { typeof(object), typeof(StreamingContext) }, type, true);
+            var dynMethod = new DynamicMethod("Call" + attributeType.Name, typeof(void), new[] { typeof(object), typeof(StreamingContext) }, type, true);
             var ilGen = dynMethod.GetILGenerator();
             ilGen.Emit(OpCodes.Ldarg_0);
             ilGen.Emit(OpCodes.Castclass, type);
             ilGen.Emit(OpCodes.Ldarg_1);
-            ilGen.EmitCall(onDeserializedMethod);
+            ilGen.EmitCall(serializationEventMethod);
             ilGen.Emit(OpCodes.Ret);
 
             int index;
-            lock (OnDeserializedHelper.OnDeserializedActions)
+            lock (SerializationEventsHelper.SerializationEvents)
             {
-                index = OnDeserializedHelper.OnDeserializedActions.Count;
-                OnDeserializedHelper.OnDeserializedActions.Add((Action<object, StreamingContext>)dynMethod.CreateDelegate(typeof(Action<object, StreamingContext>)));
+                index = SerializationEventsHelper.SerializationEvents.Count;
+                SerializationEventsHelper.SerializationEvents.Add((Action<object, StreamingContext>)dynMethod.CreateDelegate(typeof(Action<object, StreamingContext>)));
             }
 
-            var onDeserializedActionsField = typeof(OnDeserializedHelper).GetField("OnDeserializedActions", BindingFlags.Static | BindingFlags.Public);
-            il.Emit(OpCodes.Ldsfld, onDeserializedActionsField);
+            il.Emit(OpCodes.Ldsfld, SerializationEventsHelper.SerializationEventsField);
             il.EmitLdc_I4(index);
-            il.EmitCall(onDeserializedActionsField.FieldType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public));
+            il.EmitCall(SerializationEventsHelper.SerializationEventsField.FieldType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public));
 
             il.EmitLdloc(resultingObj);
-            il.Emit(OpCodes.Ldsfld, typeof(OnDeserializedHelper).GetField("StreamingContext", BindingFlags.Static | BindingFlags.Public));
+            il.Emit(OpCodes.Ldsfld, SerializationEventsHelper.StreamingContextField);
 
             var invokeMethod = typeof(Action<object, StreamingContext>).GetMethod("Invoke", BindingFlags.Instance | BindingFlags.Public);
             il.EmitCall(invokeMethod);
+        }
+
+        static MethodInfo GetMethodWithAttribute(Type type, Type attributeType)
+        {
+            return type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .FirstOrDefault(_ => _.GetCustomAttribute(attributeType) != null);
         }
 
         static void EmitDeserializeValue(ILGenerator il, DeserializeInfo info, int index, Func<int, MetaMember, bool> tryEmitLoadCustomFormatter, ArgumentField reader, ArgumentField argResolver)
