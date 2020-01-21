@@ -8,6 +8,8 @@ using Utf8Json.Formatters;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Reflection.Emit;
+using System.Runtime.Serialization;
+
 using Utf8Json.Resolvers.Internal;
 
 namespace Utf8Json.Resolvers
@@ -470,6 +472,12 @@ namespace Utf8Json.Resolvers.Internal
 
     #endregion
 
+    public static class OnDeserializedHelper
+    {
+        public static StreamingContext StreamingContext;
+        public static List<Action<object, StreamingContext>> OnDeserializedActions = new List<Action<object, StreamingContext>>(8192);
+    }
+
     internal static class DynamicObjectTypeBuilder
     {
 #if NETSTANDARD
@@ -477,8 +485,7 @@ namespace Utf8Json.Resolvers.Internal
 #else
         static readonly Regex SubtractFullNameRegex = new Regex(@", Version=\d+.\d+.\d+.\d+, Culture=\w+, PublicKeyToken=\w+");
 #endif
-
-
+        
         static int nameSequence = 0;
 
         static HashSet<Type> ignoreTypes = new HashSet<Type>
@@ -1296,7 +1303,52 @@ namespace Utf8Json.Resolvers.Internal
                 il.Emit(OpCodes.Ldloc, localResult);
             }
 
+            EmitOnDeserializedCall(il, type);
+
             il.Emit(OpCodes.Ret);
+        }
+
+        private static void EmitOnDeserializedCall(ILGenerator il, Type type)
+        {
+            var onDeserializedMethod = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .FirstOrDefault(_ => _.GetCustomAttribute<OnDeserializedAttribute>() != null);
+            if (onDeserializedMethod == null) return;
+
+            if (onDeserializedMethod.IsPublic)
+            {
+                // call public OnDeserialized method
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldsfld, typeof(OnDeserializedHelper).GetField("StreamingContext"));
+                il.EmitCall(onDeserializedMethod);
+                return;
+            }
+
+            // We have to call the private OnDeserialized method. This has to be done with a delegate.
+            var resultingObj = il.DeclareLocal(type);
+            il.Emit(OpCodes.Dup);
+            il.EmitStloc(resultingObj);
+
+            var dynMethod = new DynamicMethod("CallOnDeserialized", typeof(void), new[] { typeof(object), typeof(StreamingContext) }, type, true);
+            var ilGen = dynMethod.GetILGenerator();
+            ilGen.Emit(OpCodes.Ldarg_0);
+            ilGen.Emit(OpCodes.Castclass, type);
+            ilGen.Emit(OpCodes.Ldarg_1);
+            ilGen.EmitCall(onDeserializedMethod);
+            ilGen.Emit(OpCodes.Ret);
+
+            var index = OnDeserializedHelper.OnDeserializedActions.Count;
+            OnDeserializedHelper.OnDeserializedActions.Add((Action<object, StreamingContext>)dynMethod.CreateDelegate(typeof(Action<object, StreamingContext>)));
+
+            var OnDeserializedActionsField = typeof(OnDeserializedHelper).GetField("OnDeserializedActions", BindingFlags.Static | BindingFlags.Public);
+            il.Emit(OpCodes.Ldsfld, OnDeserializedActionsField);
+            il.EmitLdc_I4(index);
+            il.EmitCall(OnDeserializedActionsField.FieldType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public));
+
+            il.EmitLdloc(resultingObj);
+            il.Emit(OpCodes.Ldsfld, typeof(OnDeserializedHelper).GetField("StreamingContext", BindingFlags.Static | BindingFlags.Public));
+
+            var invokeMethod = typeof(Action<object, StreamingContext>).GetMethod("Invoke", BindingFlags.Instance | BindingFlags.Public);
+            il.EmitCall(invokeMethod);
         }
 
         static void EmitDeserializeValue(ILGenerator il, DeserializeInfo info, int index, Func<int, MetaMember, bool> tryEmitLoadCustomFormatter, ArgumentField reader, ArgumentField argResolver)
