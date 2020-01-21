@@ -1343,10 +1343,10 @@ namespace Utf8Json.Resolvers.Internal
                 OnDeserializedHelper.OnDeserializedActions.Add((Action<object, StreamingContext>)dynMethod.CreateDelegate(typeof(Action<object, StreamingContext>)));
             }
 
-            var OnDeserializedActionsField = typeof(OnDeserializedHelper).GetField("OnDeserializedActions", BindingFlags.Static | BindingFlags.Public);
-            il.Emit(OpCodes.Ldsfld, OnDeserializedActionsField);
+            var onDeserializedActionsField = typeof(OnDeserializedHelper).GetField("OnDeserializedActions", BindingFlags.Static | BindingFlags.Public);
+            il.Emit(OpCodes.Ldsfld, onDeserializedActionsField);
             il.EmitLdc_I4(index);
-            il.EmitCall(OnDeserializedActionsField.FieldType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public));
+            il.EmitCall(onDeserializedActionsField.FieldType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public));
 
             il.EmitLdloc(resultingObj);
             il.Emit(OpCodes.Ldsfld, typeof(OnDeserializedHelper).GetField("StreamingContext", BindingFlags.Static | BindingFlags.Public));
