@@ -1336,8 +1336,12 @@ namespace Utf8Json.Resolvers.Internal
             ilGen.EmitCall(onDeserializedMethod);
             ilGen.Emit(OpCodes.Ret);
 
-            var index = OnDeserializedHelper.OnDeserializedActions.Count;
-            OnDeserializedHelper.OnDeserializedActions.Add((Action<object, StreamingContext>)dynMethod.CreateDelegate(typeof(Action<object, StreamingContext>)));
+            int index;
+            lock (OnDeserializedHelper.OnDeserializedActions)
+            {
+                index = OnDeserializedHelper.OnDeserializedActions.Count;
+                OnDeserializedHelper.OnDeserializedActions.Add((Action<object, StreamingContext>)dynMethod.CreateDelegate(typeof(Action<object, StreamingContext>)));
+            }
 
             var OnDeserializedActionsField = typeof(OnDeserializedHelper).GetField("OnDeserializedActions", BindingFlags.Static | BindingFlags.Public);
             il.Emit(OpCodes.Ldsfld, OnDeserializedActionsField);

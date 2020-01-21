@@ -10,47 +10,34 @@ namespace Utf8Json.Internal.Emit
 {
     public static class NonPublicFieldAccessor
     {
-        private static readonly List<Func<object, object>> getterDelegates = new List<Func<object, object>>(8192);
-        private static readonly List<Action<object, object>> setterDelegates = new List<Action<object, object>>(8192);
+        public static readonly List<Func<object, object>> GetterDelegates = new List<Func<object, object>>(32768);
+        public static readonly List<Action<object, object>> SetterDelegates = new List<Action<object, object>>(32768);
 
-        public static readonly List<string> GetterFieldNames = new List<string>();
-        public static readonly List<string> SetterFieldNames = new List<string>();
-
-        public static MethodInfo GetNonPublicFieldMethod;
-        public static MethodInfo SetNonPublicFieldMethod;
+        public static FieldInfo GetterDelegatesFieldInfo;
+        public static FieldInfo SetterDelegatesFieldInfo;
 
         static NonPublicFieldAccessor()
         {
-            GetNonPublicFieldMethod = typeof(NonPublicFieldAccessor).GetMethod("GetNonPublicField", BindingFlags.Static | BindingFlags.Public);
-            SetNonPublicFieldMethod = typeof(NonPublicFieldAccessor).GetMethod("SetNonPublicField", BindingFlags.Static | BindingFlags.Public);
+            GetterDelegatesFieldInfo = typeof(NonPublicFieldAccessor).GetField("GetterDelegates", BindingFlags.Static | BindingFlags.Public);
+            SetterDelegatesFieldInfo = typeof(NonPublicFieldAccessor).GetField("SetterDelegates", BindingFlags.Static | BindingFlags.Public);
         }
 
         public static int AddGetterDelegate(Delegate del)
         {
-            lock (getterDelegates)
+            lock (GetterDelegates)
             {
-                getterDelegates.Add((Func<object, object>)del);
-                return getterDelegates.Count - 1;
+                GetterDelegates.Add((Func<object, object>)del);
+                return GetterDelegates.Count - 1;
             }
         }
 
         public static int AddSetterDelegate(Delegate del)
         {
-            lock (setterDelegates)
+            lock (SetterDelegates)
             {
-                setterDelegates.Add((Action<object, object>)del);
-                return setterDelegates.Count - 1;
+                SetterDelegates.Add((Action<object, object>)del);
+                return SetterDelegates.Count - 1;
             }
-        }
-
-        public static object GetNonPublicField(object obj, int delegateIdx)
-        {
-            return getterDelegates[delegateIdx].Invoke(obj);
-        }
-
-        public static void SetNonPublicField(object obj, object value, int delegateIdx)
-        {
-            setterDelegates[delegateIdx].Invoke(obj, value);
         }
     }
 
@@ -188,12 +175,7 @@ namespace Utf8Json.Internal.Emit
                     ilGen.EmitBoxOrDoNothing(varType);
                     ilGen.Emit(OpCodes.Ret);
 
-                    var idx = NonPublicFieldAccessor.AddGetterDelegate(dynMethod.CreateDelegate(typeof(Func<object, object>)));
-                    NonPublicFieldAccessor.GetterFieldNames.Add(getMethod.Name);
-
-                    il.EmitLdc_I4(idx);
-                    il.Emit(OpCodes.Call, NonPublicFieldAccessor.GetNonPublicFieldMethod);
-                    il.EmitUnboxOrCast(varType);
+                    EmitLoadValueWithDelegate(il, dynMethod, varType);
                 }
             }
             else
@@ -213,14 +195,27 @@ namespace Utf8Json.Internal.Emit
                     ilGen.EmitBoxOrDoNothing(FieldInfo.FieldType);
                     ilGen.Emit(OpCodes.Ret);
 
-                    var idx = NonPublicFieldAccessor.AddGetterDelegate(dynMethod.CreateDelegate(typeof(Func<object, object>)));
-                    NonPublicFieldAccessor.GetterFieldNames.Add(FieldInfo.Name);
-
-                    il.EmitLdc_I4(idx);
-                    il.Emit(OpCodes.Call, NonPublicFieldAccessor.GetNonPublicFieldMethod);
-                    il.EmitUnboxOrCast(FieldInfo.FieldType);
+                    EmitLoadValueWithDelegate(il, dynMethod, FieldInfo.FieldType);
                 }
             }
+        }
+
+        private void EmitLoadValueWithDelegate(ILGenerator il, DynamicMethod dynMethod, Type varType)
+        {
+            var obj = il.DeclareLocal(ParentType);
+            il.EmitStloc(obj);
+
+            var index = NonPublicFieldAccessor.AddGetterDelegate(dynMethod.CreateDelegate(typeof(Func<object, object>)));
+
+            il.Emit(OpCodes.Ldsfld, NonPublicFieldAccessor.GetterDelegatesFieldInfo);
+            il.EmitLdc_I4(index);
+            il.EmitCall(NonPublicFieldAccessor.GetterDelegatesFieldInfo.FieldType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public));
+
+            il.EmitLdloc(obj);
+            var invokeMethod = typeof(Func<object, object>).GetMethod("Invoke", BindingFlags.Instance | BindingFlags.Public);
+            il.EmitCall(invokeMethod);
+
+            il.EmitUnboxOrCast(varType);
         }
 
         public virtual void EmitStoreValue(ILGenerator il)
@@ -244,12 +239,7 @@ namespace Utf8Json.Internal.Emit
                     ilGen.Emit(OpCodes.Call, setMethod);
                     ilGen.Emit(OpCodes.Ret);
 
-                    var idx = NonPublicFieldAccessor.AddSetterDelegate(dynMethod.CreateDelegate(typeof(Action<object, object>)));
-                    NonPublicFieldAccessor.SetterFieldNames.Add(setMethod.Name);
-
-                    il.EmitBoxOrDoNothing(varType);
-                    il.EmitLdc_I4(idx);
-                    il.Emit(OpCodes.Call, NonPublicFieldAccessor.SetNonPublicFieldMethod);
+                    EmitSaveValueWithDelegate(il, dynMethod, varType);
                 }
             }
             else
@@ -270,14 +260,30 @@ namespace Utf8Json.Internal.Emit
                     ilGen.Emit(OpCodes.Stfld, FieldInfo);
                     ilGen.Emit(OpCodes.Ret);
 
-                    var idx = NonPublicFieldAccessor.AddSetterDelegate(dynMethod.CreateDelegate(typeof(Action<object, object>)));
-                    NonPublicFieldAccessor.SetterFieldNames.Add(FieldInfo.Name);
-
-                    il.EmitBoxOrDoNothing(FieldInfo.FieldType);
-                    il.EmitLdc_I4(idx);
-                    il.Emit(OpCodes.Call, NonPublicFieldAccessor.SetNonPublicFieldMethod);
+                    EmitSaveValueWithDelegate(il, dynMethod, FieldInfo.FieldType);
                 }
             }
+        }
+
+        private void EmitSaveValueWithDelegate(ILGenerator il, DynamicMethod dynMethod, Type varType)
+        {
+            var index = NonPublicFieldAccessor.AddSetterDelegate(dynMethod.CreateDelegate(typeof(Action<object, object>)));
+
+            il.EmitBoxOrDoNothing(varType);
+            var obj = il.DeclareLocal(ParentType);
+            var val = il.DeclareLocal(ParentType);
+            il.EmitStloc(val);
+            il.EmitStloc(obj);
+
+            il.Emit(OpCodes.Ldsfld, NonPublicFieldAccessor.SetterDelegatesFieldInfo);
+            il.EmitLdc_I4(index);
+            il.EmitCall(NonPublicFieldAccessor.SetterDelegatesFieldInfo.FieldType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public));
+
+            il.EmitLdloc(obj);
+            il.EmitLdloc(val);
+
+            var invokeMethod = typeof(Action<object, object>).GetMethod("Invoke", BindingFlags.Instance | BindingFlags.Public);
+            il.EmitCall(invokeMethod);
         }
     }
 
