@@ -565,6 +565,12 @@ namespace Utf8Json.Formatters
 
         public void Serialize(ref JsonWriter writer, Enum value, IJsonFormatterResolver formatterResolver)
         {
+            if (value == null)
+            {
+                writer.WriteNull();
+                return;
+            }
+
             string typeName;
             var type = value.GetType();
             if (!typeNames.TryGetValue(type, out typeName))
@@ -585,6 +591,7 @@ namespace Utf8Json.Formatters
 
         public Enum Deserialize(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
         {
+            if (reader.ReadIsNull()) return null;
             if (!reader.ReadIsBeginObject()) return null;
             if (reader.ReadPropertyName() != "$type") throw new JsonParsingException("$type missing");
             var typeName = reader.ReadString();
