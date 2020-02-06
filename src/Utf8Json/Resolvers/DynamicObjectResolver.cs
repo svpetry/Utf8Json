@@ -1004,9 +1004,7 @@ namespace Utf8Json.Resolvers.Internal
             // call OnSerializing method
             if (GetMethodWithAttribute(type, typeof(OnSerializingAttribute)) != null)
             {
-                argValue.EmitLoad();
-                EmitSerializationEventCall(il, type, typeof(OnSerializingAttribute));
-                il.Emit(OpCodes.Pop);
+                EmitSerializationEventCall(il, type, typeof(OnSerializingAttribute), () => argValue.EmitLoad());
             }
 
             var index = 0;
@@ -1115,9 +1113,8 @@ namespace Utf8Json.Resolvers.Internal
             // call OnSerialized method
             if (GetMethodWithAttribute(type, typeof(OnSerializedAttribute)) != null)
             {
-                argValue.EmitLoad();
-                EmitSerializationEventCall(il, type, typeof(OnSerializedAttribute));
-                il.Emit(OpCodes.Pop);
+                EmitSerializationEventCall(il, type, typeof(OnSerializedAttribute), () => argValue.EmitLoad());
+                
             }
 
             argWriter.EmitLoad();
@@ -1326,15 +1323,13 @@ namespace Utf8Json.Resolvers.Internal
             if (localResult != null)
             {
                 il.Emit(OpCodes.Ldloc, localResult);
+                EmitSerializationEventCall(il, type, typeof(OnDeserializedAttribute), ()=> il.Emit(OpCodes.Dup));
             }
-
-            EmitSerializationEventCall(il, type, typeof(OnDeserializingAttribute));
-            EmitSerializationEventCall(il, type, typeof(OnDeserializedAttribute));
 
             il.Emit(OpCodes.Ret);
         }
 
-        private static void EmitSerializationEventCall(ILGenerator il, Type type, Type attributeType)
+        private static void EmitSerializationEventCall(ILGenerator il, Type type, Type attributeType, Action emitLoadObjectAction)
         {
             var serializationEventMethod = GetMethodWithAttribute(type, attributeType);
             if (serializationEventMethod == null) return;
@@ -1342,7 +1337,7 @@ namespace Utf8Json.Resolvers.Internal
             if (serializationEventMethod.IsPublic)
             {
                 // call public OnDeserialized method
-                il.Emit(OpCodes.Dup);
+                emitLoadObjectAction();
                 il.Emit(OpCodes.Ldsfld, typeof(SerializationEventsHelper).GetField("StreamingContext"));
                 il.EmitCall(serializationEventMethod);
                 return;
@@ -1350,7 +1345,7 @@ namespace Utf8Json.Resolvers.Internal
 
             // We have to call the private OnDeserialized method. This has to be done with a delegate.
             var resultingObj = il.DeclareLocal(type);
-            il.Emit(OpCodes.Dup);
+            emitLoadObjectAction();
             il.EmitStloc(resultingObj);
 
             var dynMethod = new DynamicMethod("Call" + attributeType.Name, typeof(void), new[] { typeof(object), typeof(StreamingContext) }, type, true);
@@ -1441,6 +1436,8 @@ namespace Utf8Json.Resolvers.Internal
                 {
                     il.EmitStloc(result);
                 }
+
+                EmitSerializationEventCall(il, type, typeof(OnDeserializingAttribute), () => il.EmitLdloc(result));
 
                 foreach (var item in members.Where(x => x.MemberInfo != null && x.MemberInfo.IsWritable))
                 {
