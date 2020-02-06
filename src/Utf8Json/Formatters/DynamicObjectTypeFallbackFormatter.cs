@@ -116,7 +116,7 @@ namespace Utf8Json.Formatters
             if (formatterAndDelegate.Value.Item2)
             {
                 writer.WriteBeginObject();
-                writer.WritePropertyName("$type");
+                writer.WritePropertyName("$t");
                 var typeName = SubtractFullNameRegex.Replace(type.AssemblyQualifiedName, "");
                 writer.WriteString(typeName);
                 writer.WriteValueSeparator();
@@ -188,7 +188,7 @@ namespace Utf8Json.Formatters
             if (formatterAndDelegate.Value.Item2)
             {
                 reader.ReadIsBeginObjectWithVerify();
-                if (reader.ReadPropertyName() != "$type") throw new JsonParsingException("$type missing");
+                if (reader.ReadPropertyName() != "$t") throw new JsonParsingException("$t missing");
                 reader.ReadString();
                 reader.ReadIsValueSeparatorWithVerify();
                 if (reader.ReadPropertyName() != "$value") throw new JsonParsingException("$value missing");

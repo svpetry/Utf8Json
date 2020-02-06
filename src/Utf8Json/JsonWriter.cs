@@ -236,12 +236,9 @@ namespace Utf8Json
             buffer[offset + 0] = (byte)'"';
             buffer[offset + 1] = (byte)'$';
             buffer[offset + 2] = (byte)'t';
-            buffer[offset + 3] = (byte)'y';
-            buffer[offset + 4] = (byte)'p';
-            buffer[offset + 5] = (byte)'e';
-            buffer[offset + 6] = (byte)'"';
-            buffer[offset + 7] = (byte)':';
-            offset += 8;
+            buffer[offset + 3] = (byte)'"';
+            buffer[offset + 4] = (byte)':';
+            offset += 5;
         }
 
 #if NETSTANDARD

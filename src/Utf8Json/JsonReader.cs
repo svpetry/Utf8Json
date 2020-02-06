@@ -347,7 +347,7 @@ namespace Utf8Json
 
             var startOffset = offset;
             if (!ReadIsBeginObject()) return null;
-            if (ReadPropertyName() != "$type") throw new JsonParsingException("$type missing");
+            if (ReadPropertyName() != "$t") throw new JsonParsingException("$t missing");
             var typeName = ReadString();
 
             offset = startOffset;

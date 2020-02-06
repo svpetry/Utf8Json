@@ -586,7 +586,7 @@ namespace Utf8Json.Formatters
         public Enum Deserialize(ref JsonReader reader, IJsonFormatterResolver formatterResolver)
         {
             if (!reader.ReadIsBeginObject()) return null;
-            if (reader.ReadPropertyName() != "$type") throw new JsonParsingException("$type missing");
+            if (reader.ReadPropertyName() != "$t") throw new JsonParsingException("$t missing");
             var typeName = reader.ReadString();
 
             reader.ReadIsValueSeparatorWithVerify();
